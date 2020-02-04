@@ -18,7 +18,6 @@
 #include <unistd.h>
 
 // #include "./cJSON/cJSON.h"
-
 #include "http.h"
 
 struct user_data
@@ -27,7 +26,19 @@ struct user_data
 	size_t size;
 };
 
+struct websock_data
+{
+	int foo;
+};
+
+static struct lws_context *ws_ctx;
+static struct lws *cwsi;
+static const int port = 443;
+static const char *addr, *proto;
+
 signed char callback (struct lejp_ctx *ctx, char reason);
+int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
+int connect_sock(void);
 
 int main(int argc, char *argv[])
 {
@@ -36,7 +47,7 @@ int main(int argc, char *argv[])
 
 	/* ok i totally didn't mean we're gonna get it working and pretend in a week
 	 * that this was never written, haha, yeah...  */
-	
+
 	while (begin_http_session())
 	{
 		fprintf(stderr, "Failed to start http session. retrying in 5 sec...\n");
@@ -52,7 +63,7 @@ int main(int argc, char *argv[])
 	// printf("%s\n", cJSON_Print(json_url));
 	/* We're gonna use libwebsocket's JSON parser to cut down on libs we pull in (and build time) */
 	struct lejp_ctx context;
-	const char *names[1] = {"url"};
+	const char *names[] = {"url"};
 	struct user_data data;
 	lejp_construct(&context, callback, &data, names, 1);
 	while (lejp_parse(&context, (const unsigned char*)string, strlen(string)) < 0)
@@ -61,9 +72,43 @@ int main(int argc, char *argv[])
 		sleep(1);
 		// let it finish parsing
 	}
-	printf("%s\n", data.string); 
+	// TODO: change all these dynamically allocated arrays to const
+	// length; our strings don't really need to be dynamically
+	// allocated, and it makes security/failure a bigger concern,
+	// i think...
+	const char *tmp = "/?v=6&encoding=json";
+	data.string = realloc(data.string, data.size + strlen(tmp) + 1);
+	data.size += strlen(tmp);
+	strncat(data.string, tmp, strlen(tmp));
+	printf("%s\n", data.string);
 	lejp_destruct(&context);
 	/* but boy is it a lot uglier */
+	/* now it's lws time */
+
+	struct lws_context_creation_info info;
+
+	struct lws_protocols protocols[] =
+	{
+		{ "discord-stuff", lws_callback, sizeof(struct websock_data),  0, },
+		{ NULL, NULL, 0, 0 }
+	};
+
+	memset(&info, 0, sizeof(info));
+	info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+	info.port = CONTEXT_PORT_NO_LISTEN;
+	info.protocols = protocols;
+
+	ws_ctx = lws_create_context(&info);
+	if (!ws_ctx)
+	{
+		lwsl_err("lws init failed\n");
+	}
+
+	int n = 0;
+	while (n >=0)
+	{
+		n = lws_service(ws_ctx, 1000);
+	}
 
 	if (string) free(string);
 	end_http_session();
@@ -73,6 +118,7 @@ int main(int argc, char *argv[])
 signed char callback (struct lejp_ctx *ctx, char reason)
 {
 	struct user_data* data = (struct user_data*)ctx->user;
+	int size_delta;
 	switch(reason)
 	{
 		case LEJPCB_CONSTRUCTED:
@@ -86,25 +132,24 @@ signed char callback (struct lejp_ctx *ctx, char reason)
 
 		case LEJPCB_VAL_STR_START:
 			data->string = (char*)malloc(1);
-			data->size = 1;
+			data->string[0] = 0;
+			data->size = 0;
 			memset(ctx->buf, 0, LEJP_STRING_CHUNK);
 			break;
 
 		case LEJPCB_VAL_STR_CHUNK:
-			data->string = (char*)realloc(data->string, data->size + LEJP_STRING_CHUNK - 1);
-			memcpy(data->string + data->size - 1, ctx->buf, LEJP_STRING_CHUNK - 1);
-			data->size += LEJP_STRING_CHUNK - 1;
-			data->string[data->size - 1] = 0;
-			memset(ctx->buf, 0, LEJP_STRING_CHUNK);
-			break;
+			size_delta = LEJP_STRING_CHUNK-1;
+			goto update_buffers;
 
 		case LEJPCB_VAL_STR_END:
-			// not sure whether there's a stored value for the amount of bytes stored...
-			data->string = (char*)realloc(data->string, data->size + strlen(ctx->buf));
-			memcpy(data->string + data->size - 1, ctx->buf, strlen(ctx->buf));
-			data->size += LEJP_STRING_CHUNK - 1;
-			data->string[data->size - 1] = 0;
-			memset(ctx->buf, 0, LEJP_STRING_CHUNK);
+			size_delta = strlen(ctx->buf);
+
+		update_buffers:
+			data->string = (char*)realloc(data->string, data->size + size_delta + 1);
+			memcpy(data->string + data->size, ctx->buf, size_delta);
+			data->size += size_delta;
+			data->string[data->size] = 0;
+			memset(ctx->buf, 0, size_delta);
 			break;
 
 		case LEJPCB_COMPLETE:
@@ -113,5 +158,53 @@ signed char callback (struct lejp_ctx *ctx, char reason)
 		default:
 			break;
 	}
+	return 0;
+}
+
+int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len)
+{
+	switch(reason)
+	{
+		case LWS_CALLBACK_PROTOCOL_INIT:
+			if (connect_sock())
+			{
+			}
+			break;
+
+		case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
+			break;
+
+		case LWS_CALLBACK_CLIENT_ESTABLISHED:
+			break;
+
+		case LWS_CALLBACK_CLIENT_WRITEABLE:
+			break;
+
+		case LWS_CALLBACK_WS_CLIENT_DROP_PROTOCOL:
+			break;
+
+		case LWS_CALLBACK_CLIENT_RECEIVE_PONG:
+			break;
+
+		case LWS_CALLBACK_TIMER:
+			break;
+
+		case LWS_CALLBACK_USER:
+			break;
+
+		default:
+			break;
+	}
+
+	return lws_callback_http_dummy(wsi, reason, user, in, len);
+}
+
+int connect_sock(void)
+{
+	struct lws_client_connect_info i;
+
+	memset(&i, 0, sizeof(i));
+
+	// i.context = 
 	return 0;
 }
