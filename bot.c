@@ -34,9 +34,11 @@ struct websock_data
 static struct lws_context *ws_ctx;
 static struct lws *cwsi;
 static const int port = 443;
-static const char *addr, *proto;
+static char addr[64];
+static const char *proto;
+static const char *path = "/?v=6&encoding=json";
 
-signed char callback (struct lejp_ctx *ctx, char reason);
+signed char usr_lejp_callback (struct lejp_ctx *ctx, char reason);
 int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 int connect_sock(void);
 
@@ -61,11 +63,12 @@ int main(int argc, char *argv[])
 	// cJSON *json = cJSON_Parse(string);
 	// const cJSON *json_url = cJSON_GetObjectItem(json, "url");
 	// printf("%s\n", cJSON_Print(json_url));
-	/* We're gonna use libwebsocket's JSON parser to cut down on libs we pull in (and build time) */
+	/* We're gonna use libwebsocket's JSON parser to cut down on libs we pull in (and build time)
+	 * we can technically use LWS for our HTTP(S) API too, I think... */
 	struct lejp_ctx context;
 	const char *names[] = {"url"};
 	struct user_data data;
-	lejp_construct(&context, callback, &data, names, 1);
+	lejp_construct(&context, usr_lejp_callback, &data, names, 1);
 	while (lejp_parse(&context, (const unsigned char*)string, strlen(string)) < 0)
 	{
 		fprintf(stderr, "Incomplete parse... waiting for more input...\n");
@@ -76,14 +79,19 @@ int main(int argc, char *argv[])
 	// length; our strings don't really need to be dynamically
 	// allocated, and it makes security/failure a bigger concern,
 	// i think...
-	const char *tmp = "/?v=6&encoding=json";
-	data.string = realloc(data.string, data.size + strlen(tmp) + 1);
-	data.size += strlen(tmp);
-	strncat(data.string, tmp, strlen(tmp));
+	// const char *tmp = "/?v=6&encoding=json";
+	// data.string = realloc(data.string, data.size + strlen(tmp) + 1);
+	// data.size += strlen(tmp);
+	// strncat(data.string, tmp, strlen(tmp));
 	printf("%s\n", data.string);
+	// strip out "wss://", so the first 6 bytes
+	memcpy(addr, data.string+6, data.size-5);
+
 	lejp_destruct(&context);
 	/* but boy is it a lot uglier */
 	/* now it's lws time */
+
+	lws_set_log_level(LLL_USER | LLL_DEBUG | LLL_INFO | LLL_ERR | LLL_WARN | LLL_NOTICE, NULL);
 
 	struct lws_context_creation_info info;
 
@@ -97,6 +105,8 @@ int main(int argc, char *argv[])
 	info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 	info.port = CONTEXT_PORT_NO_LISTEN;
 	info.protocols = protocols;
+
+	proto = "discord-stuff";
 
 	ws_ctx = lws_create_context(&info);
 	if (!ws_ctx)
@@ -115,7 +125,7 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-signed char callback (struct lejp_ctx *ctx, char reason)
+signed char usr_lejp_callback (struct lejp_ctx *ctx, char reason)
 {
 	struct user_data* data = (struct user_data*)ctx->user;
 	int size_delta;
@@ -161,13 +171,19 @@ signed char callback (struct lejp_ctx *ctx, char reason)
 	return 0;
 }
 
+struct msg { void *payload; size_t len; char binary; char first; char final; };
+
 int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len)
 {
+
+	struct msg amesg;
+
 	switch(reason)
 	{
 		case LWS_CALLBACK_PROTOCOL_INIT:
 			if (connect_sock())
 			{
+				lwsl_user("Connected to WebSocket server!\n");
 			}
 			break;
 
@@ -175,6 +191,7 @@ int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
 			break;
 
 		case LWS_CALLBACK_CLIENT_ESTABLISHED:
+			lwsl_user("Client established!\n");
 			break;
 
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
@@ -192,6 +209,10 @@ int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
 		case LWS_CALLBACK_USER:
 			break;
 
+		case LWS_CALLBACK_CLIENT_RECEIVE:
+			lwsl_user("Received data: %s\n", (char*)in);
+			break;
+
 		default:
 			break;
 	}
@@ -205,6 +226,18 @@ int connect_sock(void)
 
 	memset(&i, 0, sizeof(i));
 
-	// i.context = 
-	return 0;
+	i.context = ws_ctx;
+	i.port = port;
+	i.address = addr;
+	i.path = path;
+	i.host = i.address;
+	i.origin = i.address;
+	i.ssl_connection = LCCSCF_USE_SSL;
+	i.protocol = proto;
+	i.local_protocol_name = "discord-stuff";
+	i.pwsi = &cwsi;
+
+	lwsl_user("Connecting to %s:%d%s\n", i.address, i.port, i.path);
+
+	return  !lws_client_connect_via_info(&i);
 }
