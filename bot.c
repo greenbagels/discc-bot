@@ -6,7 +6,6 @@
 
 #define _POSIX_C_SOURCE 200809L
 /* For the WebSocket-based API */
-#include <pthread.h>
 #include <libwebsockets.h>
 
 /* Language level headers */
@@ -18,13 +17,10 @@
 #include <unistd.h>
 
 // #include "./cJSON/cJSON.h"
+// #include "bot.h"
+#include "gateway.h"
 #include "http.h"
-
-struct user_data
-{
-	char *string;
-	size_t size;
-};
+#include "json.h"
 
 struct websock_data
 {
@@ -38,7 +34,6 @@ static char addr[64];
 static const char *proto;
 static const char *path = "/?v=6&encoding=json";
 
-signed char usr_lejp_callback (struct lejp_ctx *ctx, char reason);
 int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 int connect_sock(void);
 
@@ -50,48 +45,18 @@ int main(int argc, char *argv[])
 	/* ok i totally didn't mean we're gonna get it working and pretend in a week
 	 * that this was never written, haha, yeah...  */
 
-	while (begin_http_session())
-	{
-		fprintf(stderr, "Failed to start http session. retrying in 5 sec...\n");
-		sleep(5);
-	}
-
-	char *url = "https://discordapp.com/api/gateway";
-	char *string = http_get(url);
-	printf("%s\n", string);
-	// at this point, we need to parse some JSON
-	// cJSON *json = cJSON_Parse(string);
-	// const cJSON *json_url = cJSON_GetObjectItem(json, "url");
-	// printf("%s\n", cJSON_Print(json_url));
+	lws_set_log_level(LLL_USER | LLL_DEBUG | LLL_INFO | LLL_ERR | LLL_WARN | LLL_NOTICE, NULL);
+	const char *url = "https://discordapp.com/api/gateway";
+	char *gateway_url = get_gateway(url);
 	/* We're gonna use libwebsocket's JSON parser to cut down on libs we pull in (and build time)
 	 * we can technically use LWS for our HTTP(S) API too, I think... */
-	struct lejp_ctx context;
-	const char *names[] = {"url"};
-	struct user_data data;
-	lejp_construct(&context, usr_lejp_callback, &data, names, 1);
-	while (lejp_parse(&context, (const unsigned char*)string, strlen(string)) < 0)
-	{
-		fprintf(stderr, "Incomplete parse... waiting for more input...\n");
-		sleep(1);
-		// let it finish parsing
-	}
-	// TODO: change all these dynamically allocated arrays to const
-	// length; our strings don't really need to be dynamically
-	// allocated, and it makes security/failure a bigger concern,
-	// i think...
-	// const char *tmp = "/?v=6&encoding=json";
-	// data.string = realloc(data.string, data.size + strlen(tmp) + 1);
-	// data.size += strlen(tmp);
-	// strncat(data.string, tmp, strlen(tmp));
-	printf("%s\n", data.string);
+	printf("The string \"%s\" has length %lu\n", gateway_url, strlen(gateway_url));
 	// strip out "wss://", so the first 6 bytes
-	memcpy(addr, data.string+6, data.size-5);
+	memcpy(addr, gateway_url+6, strlen(gateway_url)-5);
 
-	lejp_destruct(&context);
-	/* but boy is it a lot uglier */
-	/* now it's lws time */
-
-	lws_set_log_level(LLL_USER | LLL_DEBUG | LLL_INFO | LLL_ERR | LLL_WARN | LLL_NOTICE, NULL);
+	/* but boy is lws's json parser a lot more painful to use... */
+	
+	/* oh well, now it's lws time */
 
 	struct lws_context_creation_info info;
 
@@ -115,69 +80,18 @@ int main(int argc, char *argv[])
 	}
 
 	int n = 0;
+	// TODO: take winny's advice and use libev or something (thx winny!)
 	while (n >=0)
 	{
 		n = lws_service(ws_ctx, 1000);
 	}
 
-	if (string) free(string);
-	end_http_session();
+	if (gateway_url) free(gateway_url);
 	return 0;
 }
-
-signed char usr_lejp_callback (struct lejp_ctx *ctx, char reason)
-{
-	struct user_data* data = (struct user_data*)ctx->user;
-	int size_delta;
-	switch(reason)
-	{
-		case LEJPCB_CONSTRUCTED:
-			// data->string = (char*)malloc(1);
-			// data->size = 1;
-			break;
-
-		case LEJPCB_DESTRUCTED:
-			free(data->string);
-			break;
-
-		case LEJPCB_VAL_STR_START:
-			data->string = (char*)malloc(1);
-			data->string[0] = 0;
-			data->size = 0;
-			memset(ctx->buf, 0, LEJP_STRING_CHUNK);
-			break;
-
-		case LEJPCB_VAL_STR_CHUNK:
-			size_delta = LEJP_STRING_CHUNK-1;
-			goto update_buffers;
-
-		case LEJPCB_VAL_STR_END:
-			size_delta = strlen(ctx->buf);
-
-		update_buffers:
-			data->string = (char*)realloc(data->string, data->size + size_delta + 1);
-			memcpy(data->string + data->size, ctx->buf, size_delta);
-			data->size += size_delta;
-			data->string[data->size] = 0;
-			memset(ctx->buf, 0, size_delta);
-			break;
-
-		case LEJPCB_COMPLETE:
-			break;
-
-		default:
-			break;
-	}
-	return 0;
-}
-
-struct msg { void *payload; size_t len; char binary; char first; char final; };
 
 int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len)
 {
-
-	struct msg amesg;
-
 	switch(reason)
 	{
 		case LWS_CALLBACK_PROTOCOL_INIT:

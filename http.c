@@ -29,7 +29,7 @@ void end_http_session()
 	curl_global_cleanup();
 }
 
-char *http_get(const char *api_url)
+const char *http_get(const char *api_url)
 {
 	CURL *curl = curl_easy_init();
 	struct GET_data inc_data;
@@ -89,8 +89,8 @@ size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 	}
 	memcpy(persist->string + persist->size - 1, ptr, size_delta);
 	persist->size += size_delta;
+	// Make sure to null terminate!
 	persist->string[persist->size - 1] = 0;
-	// how should we handle null terminators? at the end?? we'd need to keep a constant extra 1 len
 	return size_delta;
 }
 

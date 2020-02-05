@@ -1,6 +1,6 @@
 /* @file http.h
  * @author Sameed Pervaiz (greenbagels)
- * @short libcurl-based HTTP utilities
+ * @short libcurl-based HTTP utilities header
  * @copyright GPL v3
  */
 
@@ -18,7 +18,7 @@ struct GET_data
 
 int begin_http_session();
 void end_http_session();
-char *http_get(const char *api_url);
+const char *http_get(const char *api_url);
 int initialize_data_struct(struct GET_data *data);
 size_t write_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
 
