@@ -7,6 +7,8 @@
 #ifndef GATEWAY_H
 #define GATEWAY_H
 
+#include "../inc/json.h"
+
 enum gateway_opcode
 {
 	/* ---------- Gateway Opcodes -------- */
@@ -64,5 +66,6 @@ enum voice_opcode
 };
 
 char *get_gateway(const char* query_url);
+signed char get_gateway_callback (struct lejp_ctx *ctx, char reason);
 
 #endif

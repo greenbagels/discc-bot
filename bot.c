@@ -5,26 +5,30 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
-/* For the WebSocket-based API */
-#include <libwebsockets.h>
 
 /* Language level headers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* Third-party library headers */
+/* For libev-based event loop */
+#include <ev.h>
+/* For the WebSocket-based API */
+#include <libwebsockets.h>
+
 /* Platform-level headers */
 #include <unistd.h>
 
-// #include "./cJSON/cJSON.h"
-// #include "bot.h"
-#include "gateway.h"
-#include "http.h"
-#include "json.h"
+// #include "../inc/bot.h"
+#include "../inc/gateway.h"
+#include "../inc/http.h"
+#include "../inc/json.h"
 
 struct websock_data
 {
 	int foo;
+	struct json_parse_data json_data; 
 };
 
 static struct lws_context *ws_ctx;
@@ -62,8 +66,8 @@ int main(int argc, char *argv[])
 
 	struct lws_protocols protocols[] =
 	{
-		{ "discord-stuff", lws_callback, sizeof(struct websock_data),  0, },
-		{ NULL, NULL, 0, 0 }
+		{ "discord-stuff", lws_callback, sizeof(struct websock_data),  0, 0, 0, 0},
+		{ NULL, NULL, 0, 0, 0, 0, 0}
 	};
 
 	memset(&info, 0, sizeof(info));
@@ -81,6 +85,9 @@ int main(int argc, char *argv[])
 
 	int n = 0;
 	// TODO: take winny's advice and use libev or something (thx winny!)
+	// to do that, we should read through the libwebsockets code, since the documentation
+	// for the event handlers seems to be non-existent (sigh...)
+
 	while (n >=0)
 	{
 		n = lws_service(ws_ctx, 1000);
@@ -125,6 +132,7 @@ int lws_callback(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
 
 		case LWS_CALLBACK_CLIENT_RECEIVE:
 			lwsl_user("Received data: %s\n", (char*)in);
+			// From here, we need to parse the data.
 			break;
 
 		default:

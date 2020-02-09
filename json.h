@@ -14,12 +14,17 @@
 // #include <pthread.h>
 #include <libwebsockets.h>
 
-struct udata
+struct json_parse_data
 {
-	char* string;
-	size_t size;
+	// First, parsing data we want to keep persistent between calls (consider making these static instead?)
+	char depth; // this is our object nest level
+	char flag; // user-defined flag
+
+	char* name;
+	char* value; // this could hold any json data type
+	size_t value_len;
 };
 
-signed char usr_lejp_callback (struct lejp_ctx *ctx, char reason);
+signed char lejp_main_callback (struct lejp_ctx *ctx, char reason);
 
 #endif
